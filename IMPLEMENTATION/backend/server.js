@@ -6,7 +6,34 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// TEST ENDPOINT
+// Middleware to check if user is admin
+const requireAdmin = async (req, res, next) => {
+  const userId = req.query.userId;
+  if (!userId) {
+    return res.status(401).json({ error: "User ID required" });
+  }
+
+  let connection;
+  try {
+    connection = await oracledb.getConnection(dbConfig);
+    const result = await connection.execute(
+      `SELECT ROLE_ID FROM USERS WHERE USER_ID = :userId`,
+      [userId],
+      { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    );
+
+    if (result.rows.length === 0 || result.rows[0].ROLE_ID !== 1) {
+      return res.status(403).json({ error: "Admin access required" });
+    }
+
+    next();
+  } catch (err) {
+    console.error('Admin check error:', err.message);
+    res.status(500).json({ error: err.message });
+  } finally {
+    if (connection) await connection.close();
+  }
+};
 app.get("/test", (req, res) => {
   res.json({ status: "Backend OK", timestamp: new Date() });
 });
@@ -155,17 +182,116 @@ app.post("/register", async (req, res) => {
   }
 });
 
+// ============ PUBLIC EVENT ENDPOINTS ============
+
+// GET ALL EVENTS (Public - for user portal)
+app.get("/events", async (req, res) => {
+  let connection;
+  try {
+    connection = await oracledb.getConnection(dbConfig);
+    console.log('📌 /events called');
+
+    const result = await connection.execute(
+      `SELECT e.EVENT_ID, e.EVENT_NAME, e.EVENT_DATE, e.VENUE_ID, 
+              v.VENUE_NAME,
+              ec.CATEGORY_NAME, u.NAME as ORGANIZER_NAME,
+              COUNT(DISTINCT r.REGISTRATION_ID) as TOTAL_REGISTRATIONS,
+              MIN(tt.PRICE) as MIN_PRICE
+       FROM EVENT e
+       LEFT JOIN VENUE v ON e.VENUE_ID = v.VENUE_ID
+       LEFT JOIN EVENT_CATEGORY ec ON e.CATEGORY_ID = ec.CATEGORY_ID
+       LEFT JOIN USERS u ON e.ORGANIZER_ID = u.USER_ID
+       LEFT JOIN REGISTRATION r ON e.EVENT_ID = r.EVENT_ID
+       LEFT JOIN TICKET_TYPE tt ON e.EVENT_ID = tt.EVENT_ID
+       GROUP BY e.EVENT_ID, e.EVENT_NAME, e.EVENT_DATE, e.VENUE_ID, v.VENUE_NAME, ec.CATEGORY_NAME, u.NAME
+       ORDER BY e.EVENT_DATE DESC`,
+      [],
+      { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    );
+
+    console.log('✅ Public events found:', result.rows.length);
+    res.json(result.rows);
+  } catch (err) {
+    console.error('❌ Public events error:', err.message);
+    res.status(500).json({ error: err.message });
+  } finally {
+    if (connection) await connection.close();
+  }
+});
+
+// GET EVENT DETAILS BY ID (Public - includes tickets)
+app.get("/events/:eventId", async (req, res) => {
+  const { eventId } = req.params;
+  let connection;
+  try {
+    connection = await oracledb.getConnection(dbConfig);
+    console.log('📌 /events/:eventId called with ID:', eventId);
+
+    // Get event details
+    const eventResult = await connection.execute(
+      `SELECT e.EVENT_ID, e.EVENT_NAME, e.EVENT_DATE, e.VENUE_ID, 
+              v.VENUE_NAME, v.BUILDING, v.CAPACITY,
+              ec.CATEGORY_NAME, u.NAME as ORGANIZER_NAME,
+              COUNT(DISTINCT r.REGISTRATION_ID) as TOTAL_REGISTRATIONS
+       FROM EVENT e
+       LEFT JOIN VENUE v ON e.VENUE_ID = v.VENUE_ID
+       LEFT JOIN EVENT_CATEGORY ec ON e.CATEGORY_ID = ec.CATEGORY_ID
+       LEFT JOIN USERS u ON e.ORGANIZER_ID = u.USER_ID
+       LEFT JOIN REGISTRATION r ON e.EVENT_ID = r.EVENT_ID
+       WHERE e.EVENT_ID = :eventId
+       GROUP BY e.EVENT_ID, e.EVENT_NAME, e.EVENT_DATE, e.VENUE_ID, 
+                v.VENUE_NAME, v.BUILDING, v.CAPACITY, ec.CATEGORY_NAME, u.NAME`,
+      [eventId],
+      { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    );
+
+    if (eventResult.rows.length === 0) {
+      return res.status(404).json({ error: "Event not found" });
+    }
+
+    const event = eventResult.rows[0];
+
+    // Get ticket types for this event
+    const ticketsResult = await connection.execute(
+      `SELECT TICKET_ID, EVENT_ID, TICKET_NAME, PRICE, QUANTITY_AVAILABLE
+       FROM TICKET_TYPE
+       WHERE EVENT_ID = :eventId
+       ORDER BY PRICE ASC`,
+      [eventId],
+      { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    );
+
+    event.tickets = ticketsResult.rows;
+
+    console.log('✅ Event details retrieved:', event.EVENT_NAME);
+    res.json(event);
+  } catch (err) {
+    console.error('❌ Event details error:', err.message);
+    res.status(500).json({ error: err.message });
+  } finally {
+    if (connection) await connection.close();
+  }
+});
+
 // ============ ADMIN ENDPOINTS ============
 
-// GET ALL EVENTS
-app.get("/admin/events", async (req, res) => {
+// GET ALL EVENTS WITH DETAILS
+app.get("/admin/events", requireAdmin, async (req, res) => {
   let connection;
   try {
     connection = await oracledb.getConnection(dbConfig);
     console.log('📌 /admin/events called');
 
     const result = await connection.execute(
-      `SELECT EVENT_ID, EVENT_NAME, EVENT_DATE, VENUE_ID, CATEGORY_ID FROM EVENT`,
+      `SELECT e.EVENT_ID, e.EVENT_NAME, e.EVENT_DATE, e.VENUE_ID, 
+              ec.CATEGORY_NAME, u.NAME as ORGANIZER_NAME,
+              COUNT(r.REGISTRATION_ID) as TOTAL_REGISTRATIONS
+       FROM EVENT e
+       LEFT JOIN EVENT_CATEGORY ec ON e.CATEGORY_ID = ec.CATEGORY_ID
+       LEFT JOIN USERS u ON e.ORGANIZER_ID = u.USER_ID
+       LEFT JOIN REGISTRATION r ON e.EVENT_ID = r.EVENT_ID
+       GROUP BY e.EVENT_ID, e.EVENT_NAME, e.EVENT_DATE, e.VENUE_ID, ec.CATEGORY_NAME, u.NAME
+       ORDER BY e.EVENT_DATE DESC`,
       [],
       { outFormat: oracledb.OUT_FORMAT_OBJECT }
     );
@@ -180,8 +306,55 @@ app.get("/admin/events", async (req, res) => {
   }
 });
 
+// ADD NEW EVENT (Admin only)
+app.post("/admin/events", requireAdmin, async (req, res) => {
+  const { eventName, description, eventDate, venueId, categoryId } = req.body;
+  const userId = req.query.userId;
+
+  if (!eventName || !eventDate || !venueId || !categoryId) {
+    return res.status(400).json({ error: "Missing required fields" });
+  }
+
+  let connection;
+  try {
+    connection = await oracledb.getConnection(dbConfig);
+
+    // Get next event_id
+    const idResult = await connection.execute(
+      `SELECT MAX(EVENT_ID) + 1 as NEXT_ID FROM EVENT`,
+      [],
+      { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    );
+
+    const eventId = idResult.rows[0]?.NEXT_ID || 1;
+
+    await connection.execute(
+      `INSERT INTO EVENT (EVENT_ID, EVENT_NAME, DESCRIPTION, EVENT_DATE, VENUE_ID, CATEGORY_ID, ORGANIZER_ID)
+       VALUES (:eventId, :eventName, :description, TO_DATE(:eventDate, 'YYYY-MM-DD'), :venueId, :categoryId, :organizerId)`,
+      {
+        eventId,
+        eventName,
+        description: description || null,
+        eventDate,
+        venueId,
+        categoryId,
+        organizerId: userId
+      }
+    );
+
+    await connection.commit();
+    console.log(`✅ Event created: ${eventName} (ID: ${eventId})`);
+    res.json({ success: true, eventId, message: "Event created successfully" });
+  } catch (err) {
+    console.error('❌ Create event error:', err.message);
+    res.status(500).json({ error: err.message });
+  } finally {
+    if (connection) await connection.close();
+  }
+});
+
 // GET ALL REGISTRATIONS WITH DETAILS
-app.get("/admin/registrations", async (req, res) => {
+app.get("/admin/registrations", requireAdmin, async (req, res) => {
   let connection;
   try {
     connection = await oracledb.getConnection(dbConfig);
@@ -211,7 +384,7 @@ app.get("/admin/registrations", async (req, res) => {
 });
 
 // GET PAYMENT ANALYTICS
-app.get("/admin/payments", async (req, res) => {
+app.get("/admin/payments", requireAdmin, async (req, res) => {
   let connection;
   try {
     connection = await oracledb.getConnection(dbConfig);
@@ -239,7 +412,7 @@ app.get("/admin/payments", async (req, res) => {
 });
 
 // GET FEEDBACK DATA
-app.get("/admin/feedback", async (req, res) => {
+app.get("/admin/feedback", requireAdmin, async (req, res) => {
   let connection;
   try {
     connection = await oracledb.getConnection(dbConfig);
@@ -267,7 +440,7 @@ app.get("/admin/feedback", async (req, res) => {
 });
 
 // GET ATTENDANCE RECORDS
-app.get("/admin/attendance", async (req, res) => {
+app.get("/admin/attendance", requireAdmin, async (req, res) => {
   let connection;
   try {
     connection = await oracledb.getConnection(dbConfig);
@@ -296,7 +469,7 @@ app.get("/admin/attendance", async (req, res) => {
 });
 
 // GET DASHBOARD STATS
-app.get("/admin/stats", async (req, res) => {
+app.get("/admin/stats", requireAdmin, async (req, res) => {
   let connection;
   try {
     connection = await oracledb.getConnection(dbConfig);
@@ -502,7 +675,37 @@ app.get("/users/:userId/registrations", async (req, res) => {
 
     res.json(result.rows);
   } catch (err) {
-    console.error('❌ User registrations error:', err.message);
+    console.error('User registrations error:', err.message);
+    res.status(500).json({ error: err.message });
+  } finally {
+    if (connection) await connection.close();
+  }
+});
+
+// GET USER ATTENDANCE RECORDS
+app.get("/users/:userId/attendance", async (req, res) => {
+  const { userId } = req.params;
+
+  let connection;
+  try {
+    connection = await oracledb.getConnection(dbConfig);
+
+    const result = await connection.execute(
+      `SELECT a.ATTENDANCE_ID, e.EVENT_NAME, es.SESSION_NAME, a.ATTENDANCE_STATUS,
+              es.START_TIME, es.END_TIME
+       FROM ATTENDANCE a
+       JOIN REGISTRATION r ON a.REGISTRATION_ID = r.REGISTRATION_ID
+       JOIN EVENT_SESSION es ON a.SESSION_ID = es.SESSION_ID
+       JOIN EVENT e ON r.EVENT_ID = e.EVENT_ID
+       WHERE r.USER_ID = :userId
+       ORDER BY es.START_TIME DESC`,
+      [userId],
+      { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    );
+
+    res.json(result.rows);
+  } catch (err) {
+    console.error('User attendance error:', err.message);
     res.status(500).json({ error: err.message });
   } finally {
     if (connection) await connection.close();

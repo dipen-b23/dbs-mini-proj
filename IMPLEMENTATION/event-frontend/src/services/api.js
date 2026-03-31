@@ -78,19 +78,23 @@ export const getUserRegistrations = async (userId) => {
 // 🔥 MOCK FUNCTIONS (for events, etc.)
 
 export const getEvents = async () => {
-  return new Promise((resolve) => {
-    setTimeout(() => resolve({ data: events }), 500);
-  });
+  try {
+    const response = await api.get('/events');
+    return response;
+  } catch (error) {
+    console.error('Failed to fetch events:', error);
+    throw error;
+  }
 };
 
 export const getEventById = async (id) => {
-  return new Promise((resolve, reject) => {
-    setTimeout(() => {
-      const event = events.find((e) => e.id === parseInt(id));
-      if (event) resolve({ data: event });
-      else reject({ message: 'Event not found' });
-    }, 500);
-  });
+  try {
+    const response = await api.get(`/events/${id}`);
+    return response;
+  } catch (error) {
+    console.error('Failed to fetch event:', error);
+    throw error;
+  }
 };
 
 export const processPayment = async (registrationId, amount, paymentMethod = 'Card') => {
@@ -138,9 +142,9 @@ export const submitFeedback = async (registrationId, rating, comments) => {
 
 // ============ ADMIN FUNCTIONS ============
 
-export const getAdminStats = async () => {
+export const getAdminStats = async (userId) => {
   try {
-    const response = await api.get('/admin/stats');
+    const response = await api.get('/admin/stats', { params: { userId } });
     return response;
   } catch (error) {
     console.error('Failed to fetch admin stats:', error);
@@ -148,9 +152,9 @@ export const getAdminStats = async () => {
   }
 };
 
-export const getAdminEvents = async () => {
+export const getAdminEvents = async (userId) => {
   try {
-    const response = await api.get('/admin/events');
+    const response = await api.get('/admin/events', { params: { userId } });
     return response;
   } catch (error) {
     console.error('Failed to fetch events:', error);
@@ -158,9 +162,9 @@ export const getAdminEvents = async () => {
   }
 };
 
-export const getAdminRegistrations = async () => {
+export const getAdminRegistrations = async (userId) => {
   try {
-    const response = await api.get('/admin/registrations');
+    const response = await api.get('/admin/registrations', { params: { userId } });
     return response;
   } catch (error) {
     console.error('Failed to fetch registrations:', error);
@@ -168,9 +172,9 @@ export const getAdminRegistrations = async () => {
   }
 };
 
-export const getAdminPayments = async () => {
+export const getAdminPayments = async (userId) => {
   try {
-    const response = await api.get('/admin/payments');
+    const response = await api.get('/admin/payments', { params: { userId } });
     return response;
   } catch (error) {
     console.error('Failed to fetch payments:', error);
@@ -178,9 +182,9 @@ export const getAdminPayments = async () => {
   }
 };
 
-export const getAdminFeedback = async () => {
+export const getAdminFeedback = async (userId) => {
   try {
-    const response = await api.get('/admin/feedback');
+    const response = await api.get('/admin/feedback', { params: { userId } });
     return response;
   } catch (error) {
     console.error('Failed to fetch feedback:', error);
@@ -188,12 +192,34 @@ export const getAdminFeedback = async () => {
   }
 };
 
-export const getAdminAttendance = async () => {
+export const getAdminAttendance = async (userId) => {
   try {
-    const response = await api.get('/admin/attendance');
+    const response = await api.get('/admin/attendance', { params: { userId } });
     return response;
   } catch (error) {
     console.error('Failed to fetch attendance:', error);
+    throw error;
+  }
+};
+
+// ADD NEW EVENT (Admin function)
+export const addEvent = async (userId, eventData) => {
+  try {
+    const response = await api.post('/admin/events', eventData, { params: { userId } });
+    return response;
+  } catch (error) {
+    console.error('Failed to add event:', error);
+    throw error;
+  }
+};
+
+// GET USER ATTENDANCE
+export const getUserAttendance = async (userId) => {
+  try {
+    const response = await api.get(`/users/${userId}/attendance`);
+    return response;
+  } catch (error) {
+    console.error('Failed to fetch user attendance:', error);
     throw error;
   }
 };

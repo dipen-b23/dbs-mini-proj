@@ -103,6 +103,13 @@ const EventDetails = () => {
             <p className="text-slate-300 leading-relaxed">
               {event.DESCRIPTION || 'This is an exciting event. Register now to secure your spot!'}
             </p>
+            <div className="mt-4 space-y-2 text-sm text-slate-400">
+              <p><strong>Venue:</strong> {event.VENUE_NAME} ({event.BUILDING})</p>
+              <p><strong>Capacity:</strong> {event.CAPACITY} seats</p>
+              <p><strong>Organizer:</strong> {event.ORGANIZER_NAME}</p>
+              <p><strong>Category:</strong> {event.CATEGORY_NAME}</p>
+              <p><strong>Registrations:</strong> {event.TOTAL_REGISTRATIONS} attendees</p>
+            </div>
           </div>
 
           <div className="bg-slate-800 rounded-2xl p-6 border border-white/5">
@@ -121,7 +128,7 @@ const EventDetails = () => {
                     />
                     <div className="flex-1">
                       <p className="font-medium text-white">{ticket.TICKET_NAME}</p>
-                      <p className="text-sm text-slate-400">${ticket.PRICE}</p>
+                      <p className="text-sm text-slate-400">${ticket.PRICE} ({ticket.QUANTITY_AVAILABLE} available)</p>
                     </div>
                   </label>
                 ))

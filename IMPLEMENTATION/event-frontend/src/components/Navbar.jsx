@@ -37,6 +37,7 @@ const Navbar = () => {
             <>
               <Link to="/dashboard" className={linkClasses('/dashboard')}>Dashboard</Link>
               <Link to="/events" className={linkClasses('/events')}>Events</Link>
+              <Link to="/attendance" className={linkClasses('/attendance')}>Attendance</Link>
               {user.ROLE_ID === 1 && <Link to="/admin" className={linkClasses('/admin')}>Admin</Link>}
             </>
           )}

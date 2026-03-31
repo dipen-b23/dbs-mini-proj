@@ -10,7 +10,20 @@ const Events = () => {
     const fetchEvents = async () => {
       try {
         const response = await getEvents();
-        setEvents(response.data);
+        // Transform API data to match EventCard expectations
+        const transformedEvents = response.data.map(event => ({
+          id: event.EVENT_ID,
+          name: event.EVENT_NAME,
+          category: event.CATEGORY_NAME || 'Event',
+          venue: event.VENUE_NAME || 'TBD',
+          price: event.MIN_PRICE || 0,
+          image: 'https://images.unsplash.com/photo-1552664730-d307ca884978?w=500&h=300&fit=crop', // Default event image
+          // Keep original fields for reference
+          description: event.DESCRIPTION,
+          organizerName: event.ORGANIZER_NAME,
+          totalRegistrations: event.TOTAL_REGISTRATIONS
+        }));
+        setEvents(transformedEvents);
       } catch (error) {
         console.error("Failed to fetch events", error);
       } finally {

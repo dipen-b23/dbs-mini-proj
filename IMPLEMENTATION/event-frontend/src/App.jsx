@@ -9,6 +9,7 @@ import Events from './pages/Events';
 import EventDetails from './pages/EventDetails';
 import Payment from './pages/Payment';
 import Feedback from './pages/Feedback';
+import Attendance from './pages/Attendance';
 import Admin from './pages/Admin';
 
 const AppContent = () => {
@@ -32,6 +33,7 @@ const AppContent = () => {
             <Route path="/events/:id" element={<EventDetails />} />
             <Route path="/payment" element={<Payment />} />
             <Route path="/feedback" element={<Feedback />} />
+            <Route path="/attendance" element={<Attendance />} />
             <Route path="/admin" element={<Admin />} />
           </Routes>
         </main>

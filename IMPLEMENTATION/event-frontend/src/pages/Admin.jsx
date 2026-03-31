@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useAuth } from '../context/AuthContext';
 import { 
   getAdminStats, 
   getAdminEvents, 
@@ -7,10 +8,12 @@ import {
   getAdminFeedback, 
   getAdminAttendance,
   getUsers,
-  addUser
+  addUser,
+  addEvent
 } from '../services/api';
 
 const Admin = () => {
+  const { user } = useAuth();
   const [activeTab, setActiveTab] = useState('dashboard');
   const [stats, setStats] = useState({});
   const [users, setUsers] = useState([]);
@@ -25,21 +28,34 @@ const Admin = () => {
   const [newUser, setNewUser] = useState({ name: '', email: '', password: '', roleId: 3 });
   const [addingUser, setAddingUser] = useState(false);
 
+  // Form state for adding event
+  const [newEvent, setNewEvent] = useState({ 
+    eventName: '', 
+    description: '', 
+    eventDate: '', 
+    venueId: 1,
+    categoryId: 1
+  });
+  const [addingEvent, setAddingEvent] = useState(false);
+
   useEffect(() => {
-    fetchAllData();
-  }, []);
+    if (user?.USER_ID) {
+      fetchAllData();
+    }
+  }, [user?.USER_ID]);
 
   const fetchAllData = async () => {
     setLoading(true);
     try {
+      const userId = user.USER_ID;
       const [statsRes, usersRes, eventsRes, regsRes, paymentsRes, feedbackRes, attendanceRes] = await Promise.all([
-        getAdminStats(),
+        getAdminStats(userId),
         getUsers(),
-        getAdminEvents(),
-        getAdminRegistrations(),
-        getAdminPayments(),
-        getAdminFeedback(),
-        getAdminAttendance()
+        getAdminEvents(userId),
+        getAdminRegistrations(userId),
+        getAdminPayments(userId),
+        getAdminFeedback(userId),
+        getAdminAttendance(userId)
       ]);
 
       setStats(statsRes.data);
@@ -51,6 +67,7 @@ const Admin = () => {
       setAttendance(attendanceRes.data);
     } catch (error) {
       console.error('Failed to fetch admin data:', error);
+      alert('Failed to fetch admin data. Make sure you are logged in as an admin.');
     } finally {
       setLoading(false);
     }
@@ -88,6 +105,33 @@ const Admin = () => {
       alert(`Failed to add user: ${error.response?.data?.error || error.message}`);
     } finally {
       setAddingUser(false);
+    }
+  };
+
+  const handleAddEvent = async (e) => {
+    e.preventDefault();
+    if (!newEvent.eventName || !newEvent.eventDate || !newEvent.venueId || !newEvent.categoryId) {
+      alert('Please fill all required fields');
+      return;
+    }
+
+    setAddingEvent(true);
+    try {
+      const result = await addEvent(user.USER_ID, {
+        eventName: newEvent.eventName,
+        description: newEvent.description,
+        eventDate: newEvent.eventDate,
+        venueId: parseInt(newEvent.venueId),
+        categoryId: parseInt(newEvent.categoryId)
+      });
+      
+      alert(`Event created successfully! ID: ${result.data.eventId}`);
+      setNewEvent({ eventName: '', description: '', eventDate: '', venueId: 1, categoryId: 1 });
+      fetchAllData(); // Refresh events list
+    } catch (error) {
+      alert(`Failed to create event: ${error.response?.data?.error || error.message}`);
+    } finally {
+      setAddingEvent(false);
     }
   };
 
@@ -239,32 +283,95 @@ const Admin = () => {
             </div>
           )}
           {activeTab === 'events' && (
-            <div className="bg-slate-800/50 border border-white/10 rounded-xl overflow-hidden">
-              <div className="overflow-x-auto">
-                <table className="w-full">
-                  <thead>
-                    <tr className="bg-slate-900/50 border-b border-white/10">
-                      <th className="px-6 py-3 text-left text-sm font-semibold text-slate-300">Event Name</th>
-                      <th className="px-6 py-3 text-left text-sm font-semibold text-slate-300">Category</th>
-                      <th className="px-6 py-3 text-left text-sm font-semibold text-slate-300">Organizer</th>
-                      <th className="px-6 py-3 text-left text-sm font-semibold text-slate-300">Date</th>
-                      <th className="px-6 py-3 text-left text-sm font-semibold text-slate-300">Registrations</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {events.map((event, i) => (
-                      <tr key={i} className="border-b border-white/5 hover:bg-slate-700/50 transition">
-                        <td className="px-6 py-4 text-white font-semibold">{event.EVENT_NAME}</td>
-                        <td className="px-6 py-4 text-slate-300 text-sm">{event.CATEGORY_NAME}</td>
-                        <td className="px-6 py-4 text-slate-400 text-sm">{event.ORGANIZER_NAME}</td>
-                        <td className="px-6 py-4 text-slate-400 text-sm">
-                          {new Date(event.EVENT_DATE).toLocaleDateString()}
-                        </td>
-                        <td className="px-6 py-4 text-indigo-400 font-semibold">{event.TOTAL_REGISTRATIONS}</td>
+            <div className="space-y-6">
+              {/* Add Event Form */}
+              <div className="bg-slate-800/50 border border-white/10 rounded-xl p-6">
+                <h2 className="text-xl font-bold text-white mb-4">Create New Event</h2>
+                <form onSubmit={handleAddEvent} className="space-y-4">
+                  <div className="grid md:grid-cols-2 gap-4">
+                    <input
+                      type="text"
+                      placeholder="Event Name"
+                      value={newEvent.eventName}
+                      onChange={(e) => setNewEvent({ ...newEvent, eventName: e.target.value })}
+                      className="bg-slate-700 border border-white/10 rounded-lg px-4 py-2 text-white placeholder-slate-400"
+                    />
+                    <input
+                      type="date"
+                      placeholder="Event Date"
+                      value={newEvent.eventDate}
+                      onChange={(e) => setNewEvent({ ...newEvent, eventDate: e.target.value })}
+                      className="bg-slate-700 border border-white/10 rounded-lg px-4 py-2 text-white placeholder-slate-400"
+                    />
+                    <select
+                      value={newEvent.venueId}
+                      onChange={(e) => setNewEvent({ ...newEvent, venueId: e.target.value })}
+                      className="bg-slate-700 border border-white/10 rounded-lg px-4 py-2 text-white"
+                    >
+                      <option value="1">Auditorium A</option>
+                      <option value="2">Seminar Hall B</option>
+                      <option value="3">Conference Room C</option>
+                      <option value="4">Multipurpose Hall D</option>
+                      <option value="5">Open Air Amphitheater</option>
+                    </select>
+                    <select
+                      value={newEvent.categoryId}
+                      onChange={(e) => setNewEvent({ ...newEvent, categoryId: e.target.value })}
+                      className="bg-slate-700 border border-white/10 rounded-lg px-4 py-2 text-white"
+                    >
+                      <option value="1">Workshop</option>
+                      <option value="2">Seminar</option>
+                      <option value="3">Hackathon</option>
+                      <option value="4">Cultural Event</option>
+                      <option value="5">Sports</option>
+                      <option value="6">Competition</option>
+                    </select>
+                  </div>
+                  <textarea
+                    placeholder="Description (optional)"
+                    value={newEvent.description}
+                    onChange={(e) => setNewEvent({ ...newEvent, description: e.target.value })}
+                    className="w-full bg-slate-700 border border-white/10 rounded-lg px-4 py-2 text-white placeholder-slate-400"
+                    rows="3"
+                  />
+                  <button
+                    type="submit"
+                    disabled={addingEvent}
+                    className="bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-900 text-white font-semibold px-6 py-2 rounded-lg transition-all"
+                  >
+                    {addingEvent ? 'Creating...' : 'Create Event'}
+                  </button>
+                </form>
+              </div>
+
+              {/* Events List Table */}
+              <div className="bg-slate-800/50 border border-white/10 rounded-xl overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="bg-slate-900/50 border-b border-white/10">
+                        <th className="px-4 py-3 text-left font-semibold text-slate-300">Event Name</th>
+                        <th className="px-4 py-3 text-left font-semibold text-slate-300">Category</th>
+                        <th className="px-4 py-3 text-left font-semibold text-slate-300">Organizer</th>
+                        <th className="px-4 py-3 text-left font-semibold text-slate-300">Date</th>
+                        <th className="px-4 py-3 text-left font-semibold text-slate-300">Registrations</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {events.map((event, i) => (
+                        <tr key={i} className="border-b border-white/5 hover:bg-slate-700/50 transition">
+                          <td className="px-4 py-3 text-white font-semibold">{event.EVENT_NAME}</td>
+                          <td className="px-4 py-3 text-slate-300">{event.CATEGORY_NAME || 'N/A'}</td>
+                          <td className="px-4 py-3 text-slate-400">{event.ORGANIZER_NAME || 'N/A'}</td>
+                          <td className="px-4 py-3 text-slate-400">
+                            {new Date(event.EVENT_DATE).toLocaleDateString()}
+                          </td>
+                          <td className="px-4 py-3 text-indigo-400 font-semibold">{event.TOTAL_REGISTRATIONS || 0}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </div>
           )}

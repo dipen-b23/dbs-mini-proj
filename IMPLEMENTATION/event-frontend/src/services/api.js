@@ -213,6 +213,28 @@ export const addEvent = async (userId, eventData) => {
   }
 };
 
+// DELETE USER (Admin function)
+export const deleteUser = async (userId, adminId) => {
+  try {
+    const response = await api.delete(`/users/${userId}`, { params: { adminId } });
+    return response;
+  } catch (error) {
+    console.error('Failed to delete user:', error);
+    throw error;
+  }
+};
+
+// DELETE EVENT (Admin function)
+export const deleteEvent = async (eventId, adminId) => {
+  try {
+    const response = await api.delete(`/admin/events/${eventId}`, { params: { adminId } });
+    return response;
+  } catch (error) {
+    console.error('Failed to delete event:', error);
+    throw error;
+  }
+};
+
 // GET USER ATTENDANCE
 export const getUserAttendance = async (userId) => {
   try {

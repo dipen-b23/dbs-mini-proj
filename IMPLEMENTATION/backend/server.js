@@ -308,11 +308,15 @@ app.get("/admin/events", requireAdmin, async (req, res) => {
 
 // ADD NEW EVENT (Admin only)
 app.post("/admin/events", requireAdmin, async (req, res) => {
-  const { eventName, description, eventDate, venueId, categoryId } = req.body;
+  const { eventName, description, eventDate, venueId, categoryId, tickets } = req.body;
   const userId = req.query.userId;
 
   if (!eventName || !eventDate || !venueId || !categoryId) {
     return res.status(400).json({ error: "Missing required fields" });
+  }
+
+  if (!tickets || tickets.length === 0) {
+    return res.status(400).json({ error: "Event must have at least one ticket type" });
   }
 
   let connection;
@@ -328,6 +332,7 @@ app.post("/admin/events", requireAdmin, async (req, res) => {
 
     const eventId = idResult.rows[0]?.NEXT_ID || 1;
 
+    // Insert event
     await connection.execute(
       `INSERT INTO EVENT (EVENT_ID, EVENT_NAME, DESCRIPTION, EVENT_DATE, VENUE_ID, CATEGORY_ID, ORGANIZER_ID)
        VALUES (:eventId, :eventName, :description, TO_DATE(:eventDate, 'YYYY-MM-DD'), :venueId, :categoryId, :organizerId)`,
@@ -342,9 +347,36 @@ app.post("/admin/events", requireAdmin, async (req, res) => {
       }
     );
 
+    // Get next ticket_id
+    const ticketIdResult = await connection.execute(
+      `SELECT MAX(TICKET_ID) + 1 as NEXT_ID FROM TICKET_TYPE`,
+      [],
+      { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    );
+
+    let nextTicketId = ticketIdResult.rows[0]?.NEXT_ID || 1;
+
+    // Insert ticket types
+    for (let ticket of tickets) {
+      if (ticket.ticketName && ticket.price && ticket.quantityAvailable) {
+        await connection.execute(
+          `INSERT INTO TICKET_TYPE (TICKET_ID, EVENT_ID, TICKET_NAME, PRICE, QUANTITY_AVAILABLE)
+           VALUES (:ticketId, :eventId, :ticketName, :price, :quantity)`,
+          {
+            ticketId: nextTicketId,
+            eventId,
+            ticketName: ticket.ticketName,
+            price: parseFloat(ticket.price),
+            quantity: parseInt(ticket.quantityAvailable)
+          }
+        );
+        nextTicketId++;
+      }
+    }
+
     await connection.commit();
-    console.log(`✅ Event created: ${eventName} (ID: ${eventId})`);
-    res.json({ success: true, eventId, message: "Event created successfully" });
+    console.log(`✅ Event created: ${eventName} (ID: ${eventId}) with ${tickets.length} ticket types`);
+    res.json({ success: true, eventId, message: "Event and tickets created successfully" });
   } catch (err) {
     console.error('❌ Create event error:', err.message);
     res.status(500).json({ error: err.message });
@@ -706,6 +738,86 @@ app.get("/users/:userId/attendance", async (req, res) => {
     res.json(result.rows);
   } catch (err) {
     console.error('User attendance error:', err.message);
+    res.status(500).json({ error: err.message });
+  } finally {
+    if (connection) await connection.close();
+  }
+});
+
+// DELETE USER (Admin only)
+app.delete("/users/:userId", async (req, res) => {
+  const { userId } = req.params;
+  const adminId = req.query.adminId;
+  
+  if (!adminId) {
+    return res.status(401).json({ error: "Admin ID required" });
+  }
+
+  let connection;
+  try {
+    connection = await oracledb.getConnection(dbConfig);
+    
+    // Verify requester is admin
+    const adminCheck = await connection.execute(
+      `SELECT ROLE_ID FROM USERS WHERE USER_ID = :userId`,
+      [adminId],
+      { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    );
+    
+    if (adminCheck.rows.length === 0 || adminCheck.rows[0].ROLE_ID !== 1) {
+      return res.status(403).json({ error: "Admin access required" });
+    }
+
+    // Delete user
+    const deleteResult = await connection.execute(
+      `DELETE FROM USERS WHERE USER_ID = :userId`,
+      [userId]
+    );
+
+    if (deleteResult.rowsAffected === 0) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    await connection.commit();
+    console.log(`✅ User deleted: ID ${userId}`);
+    res.json({ success: true, message: "User deleted successfully" });
+  } catch (err) {
+    console.error('Delete user error:', err.message);
+    res.status(500).json({ error: err.message });
+  } finally {
+    if (connection) await connection.close();
+  }
+});
+
+// DELETE EVENT (Admin only)
+app.delete("/admin/events/:eventId", requireAdmin, async (req, res) => {
+  const { eventId } = req.params;
+  
+  let connection;
+  try {
+    connection = await oracledb.getConnection(dbConfig);
+
+    // Delete associated ticket types first
+    await connection.execute(
+      `DELETE FROM TICKET_TYPE WHERE EVENT_ID = :eventId`,
+      [eventId]
+    );
+
+    // Delete the event
+    const deleteResult = await connection.execute(
+      `DELETE FROM EVENT WHERE EVENT_ID = :eventId`,
+      [eventId]
+    );
+
+    if (deleteResult.rowsAffected === 0) {
+      return res.status(404).json({ error: "Event not found" });
+    }
+
+    await connection.commit();
+    console.log(`✅ Event deleted: ID ${eventId}`);
+    res.json({ success: true, message: "Event deleted successfully" });
+  } catch (err) {
+    console.error('Delete event error:', err.message);
     res.status(500).json({ error: err.message });
   } finally {
     if (connection) await connection.close();

@@ -5,18 +5,18 @@
 -- LAST UPDATED: March 31, 2026
 -- 
 -- IMPLEMENTED FEATURES:
--- ✅ User Management (5 roles: Admin, Organizer, Student, Volunteer, Faculty)
--- ✅ Event Management (creation, categorization, venue selection)
--- ✅ Ticket Management (tiered pricing with quantity tracking)
--- ✅ Event Sessions (multi-session tracking with specific times)
--- ✅ Registration System (with waitlist support)
--- ✅ Attendance Tracking (per session with status)
--- ✅ Payment Processing (with status tracking)
--- ✅ Feedback System (ratings and comments)
--- ✅ Admin Dashboard (analytics and monitoring)
--- ✅ User Profiles (dashboard, attendance records, registrations)
--- ✅ Event Discovery Portal (public event listing with details)
--- ✅ Event Details Page (with ticket selection and registration)
+--  User Management (5 roles: Admin, Organizer, Student, Volunteer, Faculty)
+--  Event Management (creation, categorization, venue selection)
+--  Ticket Management (tiered pricing with quantity tracking)
+--  Event Sessions (multi-session tracking with specific times)
+--  Registration System (with waitlist support)
+--  Attendance Tracking (per session with status)
+--  Payment Processing (with status tracking)
+--  Feedback System (ratings and comments)
+--  Admin Dashboard (analytics and monitoring)
+--  User Profiles (dashboard, attendance records, registrations)
+--  Event Discovery Portal (public event listing with details)
+--  Event Details Page (with ticket selection and registration)
 --
 -- FRONTEND FEATURES SUPPORTED:
 -- - Admin Portal: Event creation, user management, statistics
@@ -500,6 +500,454 @@ CREATE INDEX idx_venue_on_event ON Event(venue_id);
 CREATE INDEX idx_category_on_event ON Event(category_id);
 
 
+CREATE OR REPLACE TRIGGER trg_payment_complete
+AFTER UPDATE OF payment_status ON Payment
+FOR EACH ROW
+WHEN (NEW.payment_status = 'Completed')
+BEGIN
+    UPDATE Registration
+    SET registration_status = 'Confirmed'
+    WHERE registration_id = :NEW.registration_id;
+END;
+/
+
+
+-- ============================================================================
+-- EVENT MANAGEMENT DBMS - CRITICAL SQL QUERIES
+-- Useful for:
+-- 1. Lab submission (demonstrate query writing)
+-- 2. Viva (explain business logic)
+-- 3. Future reference
+-- ============================================================================
+
+-- ============================================================================
+-- 1. BASIC RETRIEVAL QUERIES
+-- ============================================================================
+
+-- Q1.1: List all confirmed registrations for an event
+SELECT 
+    r.registration_id,
+    u.name AS student_name,
+    u.email,
+    e.event_name,
+    r.registration_date,
+    tt.ticket_name,
+    tt.price
+FROM Registration r
+JOIN User u ON r.user_id = u.user_id
+JOIN Event e ON r.event_id = e.event_id
+JOIN Ticket_Type tt ON r.ticket_id = tt.ticket_id
+WHERE e.event_id = 1 AND r.registration_status = 'Confirmed'
+ORDER BY r.registration_date;
+
+-- Q1.2: Find all events organized by a specific organizer
+SELECT 
+    e.event_id,
+    e.event_name,
+    e.event_date,
+    v.venue_name,
+    ec.category_name,
+    v.capacity
+FROM Event e
+JOIN Venue v ON e.venue_id = v.venue_id
+JOIN Event_Category ec ON e.category_id = ec.category_id
+WHERE e.organizer_id = 2
+ORDER BY e.event_date;
+
+-- Q1.3: Get all sessions for a specific event with timings
+SELECT 
+    es.session_id,
+    es.session_name,
+    es.start_time,
+    es.end_time,
+    TIMEDIFF(es.end_time, es.start_time) AS duration
+FROM Event_Session es
+WHERE es.event_id = 1
+ORDER BY es.start_time;
+
+-- ============================================================================
+-- 2. WAITLIST MANAGEMENT QUERIES
+-- ============================================================================
+
+-- Q2.1: Get all waitlisted registrations for an event
+SELECT 
+    r.registration_id,
+    u.name,
+    u.email,
+    r.waitlist_position,
+    r.registration_date,
+    tt.ticket_name,
+    tt.price
+FROM Registration r
+JOIN User u ON r.user_id = u.user_id
+JOIN Ticket_Type tt ON r.ticket_id = tt.ticket_id
+WHERE r.event_id = 1 AND r.registration_status = 'Waitlisted'
+ORDER BY r.waitlist_position;
+
+-- Q2.2: Check waitlist count for each event
+SELECT 
+    e.event_name,
+    COUNT(r.registration_id) AS waitlist_count,
+    COUNT(CASE WHEN r.registration_status = 'Confirmed' THEN 1 END) AS confirmed_count,
+    v.capacity,
+    (v.capacity - COUNT(CASE WHEN r.registration_status = 'Confirmed' THEN 1 END)) AS available_capacity
+FROM Event e
+LEFT JOIN Registration r ON e.event_id = r.event_id
+JOIN Venue v ON e.venue_id = v.venue_id
+GROUP BY e.event_id, e.event_name, v.capacity
+ORDER BY waitlist_count DESC;
+
+-- ============================================================================
+-- 3. ATTENDANCE TRACKING QUERIES
+-- ============================================================================
+
+-- Q3.1: Get attendance summary for a specific event
+SELECT 
+    es.session_name,
+    COUNT(a.attendance_id) AS total_attendance_records,
+    SUM(CASE WHEN a.attendance_status = 'Present' THEN 1 ELSE 0 END) AS present_count,
+    SUM(CASE WHEN a.attendance_status = 'Absent' THEN 1 ELSE 0 END) AS absent_count,
+    ROUND(100.0 * SUM(CASE WHEN a.attendance_status = 'Present' THEN 1 ELSE 0 END) 
+          / COUNT(a.attendance_id), 2) AS attendance_percentage
+FROM Attendance a
+JOIN Event_Session es ON a.session_id = es.session_id
+WHERE es.event_id = 1
+GROUP BY es.session_id, es.session_name
+ORDER BY es.start_time;
+
+-- Q3.2: Get individual student attendance record for an event
+SELECT 
+    u.name,
+    u.email,
+    e.event_name,
+    es.session_name,
+    a.attendance_status,
+    es.start_time,
+    es.end_time
+FROM Attendance a
+JOIN Registration r ON a.registration_id = r.registration_id
+JOIN User u ON r.user_id = u.user_id
+JOIN Event_Session es ON a.session_id = es.session_id
+JOIN Event e ON es.event_id = e.event_id
+WHERE e.event_id = 1
+ORDER BY u.name, es.start_time;
+
+-- Q3.3: Students with 100% attendance in an event
+SELECT 
+    u.user_id,
+    u.name,
+    u.email,
+    e.event_name,
+    COUNT(a.attendance_id) AS sessions_attended
+FROM Registration r
+JOIN User u ON r.user_id = u.user_id
+JOIN Event e ON r.event_id = e.event_id
+JOIN Attendance a ON r.registration_id = a.registration_id
+WHERE e.event_id = 1 AND a.attendance_status = 'Present'
+GROUP BY u.user_id, u.name, u.email, e.event_name
+HAVING COUNT(a.attendance_id) = (SELECT COUNT(*) FROM Event_Session WHERE event_id = 1);
+
+-- ============================================================================
+-- 4. PAYMENT AND REVENUE QUERIES
+-- ============================================================================
+
+-- Q4.1: Revenue analysis per event
+SELECT 
+    e.event_id,
+    e.event_name,
+    COUNT(DISTINCT r.registration_id) AS total_registrations,
+    COUNT(CASE WHEN p.payment_status = 'Completed' THEN 1 END) AS completed_payments,
+    SUM(CASE WHEN p.payment_status = 'Completed' THEN p.amount ELSE 0 END) AS total_revenue,
+    SUM(CASE WHEN p.payment_status = 'Pending' THEN p.amount ELSE 0 END) AS pending_amount,
+    SUM(CASE WHEN p.payment_status = 'Failed' THEN p.amount ELSE 0 END) AS failed_amount,
+    ROUND(100.0 * COUNT(CASE WHEN p.payment_status = 'Completed' THEN 1 END) 
+          / COUNT(DISTINCT r.registration_id), 2) AS payment_success_rate
+FROM Event e
+LEFT JOIN Registration r ON e.event_id = r.event_id
+LEFT JOIN Payment p ON r.registration_id = p.registration_id
+GROUP BY e.event_id, e.event_name
+ORDER BY total_revenue DESC;
+
+-- Q4.2: Payment status overview
+SELECT 
+    p.payment_status,
+    COUNT(p.payment_id) AS payment_count,
+    SUM(p.amount) AS total_amount,
+    AVG(p.amount) AS average_amount
+FROM Payment p
+GROUP BY p.payment_status;
+
+-- Q4.3: Revenue by ticket type for an event
+SELECT 
+    tt.ticket_name,
+    COUNT(r.registration_id) AS tickets_sold,
+    tt.price,
+    COUNT(r.registration_id) * tt.price AS expected_revenue,
+    SUM(CASE WHEN p.payment_status = 'Completed' THEN p.amount ELSE 0 END) AS actual_revenue
+FROM Ticket_Type tt
+LEFT JOIN Registration r ON tt.ticket_id = r.ticket_id
+LEFT JOIN Payment p ON r.registration_id = p.registration_id
+WHERE tt.event_id = 1
+GROUP BY tt.ticket_id, tt.ticket_name, tt.price;
+
+-- ============================================================================
+-- 5. FEEDBACK AND ANALYTICS QUERIES
+-- ============================================================================
+
+-- Q5.1: Event ratings and feedback summary
+SELECT 
+    e.event_name,
+    COUNT(f.feedback_id) AS total_feedback,
+    ROUND(AVG(f.rating), 2) AS average_rating,
+    MAX(f.rating) AS max_rating,
+    MIN(f.rating) AS min_rating,
+    COUNT(CASE WHEN f.rating >= 4 THEN 1 END) AS positive_feedback_count,
+    COUNT(CASE WHEN f.rating <= 2 THEN 1 END) AS negative_feedback_count
+FROM Event e
+LEFT JOIN Registration r ON e.event_id = r.event_id
+LEFT JOIN Feedback f ON r.registration_id = f.registration_id
+GROUP BY e.event_id, e.event_name
+ORDER BY average_rating DESC;
+
+-- Q5.2: Get all feedback for a specific event with student names
+SELECT 
+    u.name,
+    u.email,
+    f.rating,
+    f.comments,
+    r.registration_date
+FROM Feedback f
+JOIN Registration r ON f.registration_id = r.registration_id
+JOIN User u ON r.user_id = u.user_id
+WHERE r.event_id = 1
+ORDER BY f.rating DESC;
+
+-- Q5.3: Best and worst rated events
+(SELECT 'Best' AS type, e.event_name, ROUND(AVG(f.rating), 2) AS avg_rating
+ FROM Event e
+ JOIN Registration r ON e.event_id = r.event_id
+ JOIN Feedback f ON r.registration_id = f.registration_id
+ GROUP BY e.event_id, e.event_name
+ ORDER BY avg_rating DESC
+ LIMIT 3)
+UNION ALL
+(SELECT 'Worst' AS type, e.event_name, ROUND(AVG(f.rating), 2) AS avg_rating
+ FROM Event e
+ JOIN Registration r ON e.event_id = r.event_id
+ JOIN Feedback f ON r.registration_id = f.registration_id
+ GROUP BY e.event_id, e.event_name
+ ORDER BY avg_rating ASC
+ LIMIT 3);
+
+-- ============================================================================
+-- 6. CATEGORY AND POPULARITY QUERIES
+-- ============================================================================
+
+-- Q6.1: Most popular event categories
+SELECT 
+    ec.category_name,
+    COUNT(DISTINCT e.event_id) AS event_count,
+    COUNT(DISTINCT r.registration_id) AS total_registrations,
+    ROUND(AVG(f.rating), 2) AS average_rating
+FROM Event_Category ec
+LEFT JOIN Event e ON ec.category_id = e.category_id
+LEFT JOIN Registration r ON e.event_id = r.event_id
+LEFT JOIN Feedback f ON r.registration_id = f.registration_id
+GROUP BY ec.category_id, ec.category_name
+ORDER BY total_registrations DESC;
+
+-- Q6.2: Events by category with registration count
+SELECT 
+    ec.category_name,
+    e.event_name,
+    e.event_date,
+    v.venue_name,
+    COUNT(r.registration_id) AS registration_count,
+    SUM(CASE WHEN r.registration_status = 'Confirmed' THEN 1 ELSE 0 END) AS confirmed_count,
+    SUM(CASE WHEN r.registration_status = 'Waitlisted' THEN 1 ELSE 0 END) AS waitlist_count
+FROM Event_Category ec
+JOIN Event e ON ec.category_id = e.category_id
+JOIN Venue v ON e.venue_id = v.venue_id
+LEFT JOIN Registration r ON e.event_id = r.event_id
+GROUP BY ec.category_id, ec.category_name, e.event_id, e.event_name, e.event_date, v.venue_name
+ORDER BY ec.category_name, e.event_date;
+
+-- ============================================================================
+-- 7. VENUE MANAGEMENT QUERIES
+-- ============================================================================
+
+-- Q7.1: Venue utilization analysis
+SELECT 
+    v.venue_name,
+    v.capacity,
+    COUNT(DISTINCT e.event_id) AS events_hosted,
+    COUNT(DISTINCT CASE WHEN r.registration_status = 'Confirmed' THEN r.registration_id END) 
+        AS total_confirmed_registrations,
+    ROUND(100.0 * COUNT(DISTINCT CASE WHEN r.registration_status = 'Confirmed' THEN r.registration_id END) 
+          / (v.capacity * COUNT(DISTINCT e.event_id)), 2) AS utilization_percentage
+FROM Venue v
+LEFT JOIN Event e ON v.venue_id = e.venue_id
+LEFT JOIN Registration r ON e.event_id = r.event_id
+GROUP BY v.venue_id, v.venue_name, v.capacity
+ORDER BY utilization_percentage DESC;
+
+-- Q7.2: Check for venue conflicts (overlapping events on same date and venue)
+SELECT 
+    v.venue_name,
+    e1.event_name AS event_1,
+    e1.event_date,
+    e2.event_name AS event_2,
+    e2.event_date
+FROM Event e1
+JOIN Event e2 ON e1.venue_id = e2.venue_id 
+    AND e1.event_date = e2.event_date 
+    AND e1.event_id < e2.event_id
+JOIN Venue v ON e1.venue_id = v.venue_id;
+
+-- ============================================================================
+-- 8. USER AND ROLE-BASED QUERIES
+-- ============================================================================
+
+-- Q8.1: Student participation summary
+SELECT 
+    u.user_id,
+    u.name,
+    u.email,
+    COUNT(DISTINCT r.event_id) AS events_registered,
+    COUNT(CASE WHEN r.registration_status = 'Confirmed' THEN 1 END) AS confirmed_events,
+    COUNT(CASE WHEN r.registration_status = 'Waitlisted' THEN 1 END) AS waitlisted_events,
+    SUM(CASE WHEN p.payment_status = 'Completed' THEN p.amount ELSE 0 END) AS total_spent,
+    COUNT(DISTINCT f.feedback_id) AS feedback_given
+FROM User u
+LEFT JOIN Registration r ON u.user_id = r.user_id
+LEFT JOIN Payment p ON r.registration_id = p.registration_id
+LEFT JOIN Feedback f ON r.registration_id = f.registration_id
+WHERE u.role_id = 3
+GROUP BY u.user_id, u.name, u.email
+ORDER BY events_registered DESC;
+
+-- Q8.2: Organizer event management overview
+SELECT 
+    u.user_id,
+    u.name,
+    u.email,
+    COUNT(DISTINCT e.event_id) AS events_organized,
+    SUM(COUNT(DISTINCT CASE WHEN r.registration_status = 'Confirmed' THEN r.registration_id END)) 
+        OVER (PARTITION BY u.user_id) AS total_confirmed_registrations,
+    ROUND(AVG(f.rating), 2) AS average_event_rating
+FROM User u
+LEFT JOIN Event e ON u.user_id = e.organizer_id
+LEFT JOIN Registration r ON e.event_id = r.event_id
+LEFT JOIN Feedback f ON r.registration_id = f.registration_id
+WHERE u.role_id = 2
+GROUP BY u.user_id, u.name, u.email
+ORDER BY events_organized DESC;
+
+-- Q8.3: Get user details by role
+SELECT 
+    r.role_name,
+    COUNT(u.user_id) AS user_count,
+    GROUP_CONCAT(u.name SEPARATOR ', ') AS user_names
+FROM Role r
+LEFT JOIN User u ON r.role_id = u.role_id
+GROUP BY r.role_id, r.role_name;
+
+-- ============================================================================
+-- 9. COMPLEX ANALYTICAL QUERIES
+-- ============================================================================
+
+-- Q9.1: Complete event summary with all metrics
+SELECT 
+    e.event_id,
+    e.event_name,
+    ec.category_name,
+    v.venue_name,
+    v.capacity,
+    u.name AS organizer_name,
+    e.event_date,
+    COUNT(DISTINCT r.registration_id) AS total_registrations,
+    SUM(CASE WHEN r.registration_status = 'Confirmed' THEN 1 ELSE 0 END) AS confirmed,
+    SUM(CASE WHEN r.registration_status = 'Waitlisted' THEN 1 ELSE 0 END) AS waitlisted,
+    ROUND(100.0 * SUM(CASE WHEN a.attendance_status = 'Present' THEN 1 ELSE 0 END) 
+          / COUNT(DISTINCT a.attendance_id), 2) AS attendance_rate,
+    ROUND(AVG(f.rating), 2) AS avg_rating,
+    SUM(CASE WHEN p.payment_status = 'Completed' THEN p.amount ELSE 0 END) AS revenue
+FROM Event e
+JOIN Event_Category ec ON e.category_id = ec.category_id
+JOIN Venue v ON e.venue_id = v.venue_id
+JOIN User u ON e.organizer_id = u.user_id
+LEFT JOIN Registration r ON e.event_id = r.event_id
+LEFT JOIN Attendance a ON r.registration_id = a.registration_id
+LEFT JOIN Feedback f ON r.registration_id = f.registration_id
+LEFT JOIN Payment p ON r.registration_id = p.registration_id
+GROUP BY e.event_id, e.event_name, ec.category_name, v.venue_name, v.capacity, 
+         u.name, e.event_date
+ORDER BY e.event_date DESC;
+
+-- Q9.2: Monthly event statistics
+SELECT 
+    MONTH(e.event_date) AS month,
+    YEAR(e.event_date) AS year,
+    COUNT(DISTINCT e.event_id) AS events_count,
+    COUNT(DISTINCT r.registration_id) AS total_registrations,
+    SUM(CASE WHEN p.payment_status = 'Completed' THEN p.amount ELSE 0 END) AS total_revenue,
+    ROUND(AVG(f.rating), 2) AS avg_rating
+FROM Event e
+LEFT JOIN Registration r ON e.event_id = r.event_id
+LEFT JOIN Payment p ON r.registration_id = p.registration_id
+LEFT JOIN Feedback f ON r.registration_id = f.registration_id
+GROUP BY YEAR(e.event_date), MONTH(e.event_date)
+ORDER BY year DESC, month DESC;
+
+-- ============================================================================
+-- 10. DATA INTEGRITY AND CONSTRAINT CHECK QUERIES
+-- ============================================================================
+
+-- Q10.1: Find registrations with missing payments
+SELECT 
+    r.registration_id,
+    u.name,
+    e.event_name,
+    tt.price,
+    COALESCE(p.payment_status, 'NO PAYMENT RECORD') AS payment_status
+FROM Registration r
+JOIN User u ON r.user_id = u.user_id
+JOIN Event e ON r.event_id = e.event_id
+JOIN Ticket_Type tt ON r.ticket_id = tt.ticket_id
+LEFT JOIN Payment p ON r.registration_id = p.registration_id
+WHERE r.registration_status = 'Confirmed' AND (p.payment_id IS NULL OR p.payment_status != 'Completed');
+
+-- Q10.2: Find registrations with no feedback
+SELECT 
+    r.registration_id,
+    u.name,
+    u.email,
+    e.event_name,
+    r.registration_date
+FROM Registration r
+JOIN User u ON r.user_id = u.user_id
+JOIN Event e ON r.event_id = e.event_id
+LEFT JOIN Feedback f ON r.registration_id = f.registration_id
+WHERE f.feedback_id IS NULL AND r.registration_status = 'Confirmed'
+ORDER BY r.registration_date DESC;
+
+-- Q10.3: Check for attendance records of cancelled registrations (data integrity issue)
+SELECT 
+    a.attendance_id,
+    u.name,
+    e.event_name,
+    r.registration_status,
+    a.attendance_status
+FROM Attendance a
+JOIN Registration r ON a.registration_id = r.registration_id
+JOIN User u ON r.user_id = u.user_id
+JOIN Event e ON r.event_id = e.event_id
+WHERE r.registration_status = 'Cancelled';
+
+
+-- ============================================================================
+-- End of SQL Queries
+-- ============================================================================
 -- ============================================================================
 -- End of Schema and Data
 -- ============================================================================

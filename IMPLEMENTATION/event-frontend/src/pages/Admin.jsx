@@ -9,7 +9,9 @@ import {
   getAdminAttendance,
   getUsers,
   addUser,
-  addEvent
+  addEvent,
+  deleteUser,
+  deleteEvent
 } from '../services/api';
 
 const Admin = () => {
@@ -34,7 +36,8 @@ const Admin = () => {
     description: '', 
     eventDate: '', 
     venueId: 1,
-    categoryId: 1
+    categoryId: 1,
+    tickets: [{ ticketName: 'Standard Pass', price: 500, quantity: 100 }]
   });
   const [addingEvent, setAddingEvent] = useState(false);
 
@@ -114,6 +117,19 @@ const Admin = () => {
       alert('Please fill all required fields');
       return;
     }
+    
+    if (!newEvent.tickets || newEvent.tickets.length === 0) {
+      alert('Please add at least one ticket type');
+      return;
+    }
+    
+    // Validate all tickets
+    for (let ticket of newEvent.tickets) {
+      if (!ticket.ticketName || !ticket.price || !ticket.quantity) {
+        alert('Please fill in all ticket details');
+        return;
+      }
+    }
 
     setAddingEvent(true);
     try {
@@ -122,16 +138,56 @@ const Admin = () => {
         description: newEvent.description,
         eventDate: newEvent.eventDate,
         venueId: parseInt(newEvent.venueId),
-        categoryId: parseInt(newEvent.categoryId)
+        categoryId: parseInt(newEvent.categoryId),
+        tickets: newEvent.tickets.map(t => ({
+          ticketName: t.ticketName,
+          price: parseFloat(t.price),
+          quantityAvailable: parseInt(t.quantity)
+        }))
       });
       
       alert(`Event created successfully! ID: ${result.data.eventId}`);
-      setNewEvent({ eventName: '', description: '', eventDate: '', venueId: 1, categoryId: 1 });
+      setNewEvent({ 
+        eventName: '', 
+        description: '', 
+        eventDate: '', 
+        venueId: 1, 
+        categoryId: 1,
+        tickets: [{ ticketName: 'Standard Pass', price: 500, quantity: 100 }]
+      });
       fetchAllData(); // Refresh events list
     } catch (error) {
       alert(`Failed to create event: ${error.response?.data?.error || error.message}`);
     } finally {
       setAddingEvent(false);
+    }
+  };
+
+  const handleDeleteUser = async (userId) => {
+    if (!window.confirm(`Are you sure you want to delete user ${userId}?`)) {
+      return;
+    }
+
+    try {
+      await deleteUser(userId, user.USER_ID);
+      alert('User deleted successfully');
+      fetchAllData(); // Refresh users list
+    } catch (error) {
+      alert(`Failed to delete user: ${error.response?.data?.error || error.message}`);
+    }
+  };
+
+  const handleDeleteEvent = async (eventId) => {
+    if (!window.confirm(`Are you sure you want to delete event ${eventId}?`)) {
+      return;
+    }
+
+    try {
+      await deleteEvent(eventId, user.USER_ID);
+      alert('Event deleted successfully');
+      fetchAllData(); // Refresh events list
+    } catch (error) {
+      alert(`Failed to delete event: ${error.response?.data?.error || error.message}`);
     }
   };
 
@@ -265,6 +321,7 @@ const Admin = () => {
                         <th className="px-4 py-3 text-left font-semibold text-slate-300">Name</th>
                         <th className="px-4 py-3 text-left font-semibold text-slate-300">Email</th>
                         <th className="px-4 py-3 text-left font-semibold text-slate-300">Role ID</th>
+                        <th className="px-4 py-3 text-left font-semibold text-slate-300">Actions</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -274,6 +331,14 @@ const Admin = () => {
                           <td className="px-4 py-3 text-white">{user.NAME}</td>
                           <td className="px-4 py-3 text-slate-300">{user.EMAIL}</td>
                           <td className="px-4 py-3 text-slate-400">{user.ROLE_ID}</td>
+                          <td className="px-4 py-3">
+                            <button
+                              onClick={() => handleDeleteUser(user.USER_ID)}
+                              className="px-3 py-1 bg-red-600/80 hover:bg-red-600 text-white rounded text-xs transition"
+                            >
+                              Delete
+                            </button>
+                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -334,6 +399,74 @@ const Admin = () => {
                     className="w-full bg-slate-700 border border-white/10 rounded-lg px-4 py-2 text-white placeholder-slate-400"
                     rows="3"
                   />
+                  
+                  {/* Ticket Types Section */}
+                  <div className="border-t border-white/10 pt-4">
+                    <div className="flex justify-between items-center mb-4">
+                      <h3 className="text-lg font-semibold text-white">Ticket Types</h3>
+                      <button
+                        type="button"
+                        onClick={() => setNewEvent({
+                          ...newEvent,
+                          tickets: [...newEvent.tickets, { ticketName: '', price: 0, quantity: 0 }]
+                        })}
+                        className="text-sm bg-slate-700 hover:bg-slate-600 text-white px-3 py-1 rounded-lg transition"
+                      >
+                        + Add Ticket Type
+                      </button>
+                    </div>
+                    
+                    <div className="space-y-3 max-h-64 overflow-y-auto">
+                      {newEvent.tickets && newEvent.tickets.map((ticket, idx) => (
+                        <div key={idx} className="grid grid-cols-1 md:grid-cols-4 gap-2 items-end bg-slate-900/30 p-3 rounded-lg">
+                          <input
+                            type="text"
+                            placeholder="Ticket Name"
+                            value={ticket.ticketName}
+                            onChange={(e) => {
+                              const updated = [...newEvent.tickets];
+                              updated[idx].ticketName = e.target.value;
+                              setNewEvent({ ...newEvent, tickets: updated });
+                            }}
+                            className="bg-slate-700 border border-white/10 rounded-lg px-3 py-2 text-white placeholder-slate-400 text-sm"
+                          />
+                          <input
+                            type="number"
+                            placeholder="Price (₹)"
+                            value={ticket.price}
+                            onChange={(e) => {
+                              const updated = [...newEvent.tickets];
+                              updated[idx].price = e.target.value;
+                              setNewEvent({ ...newEvent, tickets: updated });
+                            }}
+                            className="bg-slate-700 border border-white/10 rounded-lg px-3 py-2 text-white placeholder-slate-400 text-sm"
+                          />
+                          <input
+                            type="number"
+                            placeholder="Quantity"
+                            value={ticket.quantity}
+                            onChange={(e) => {
+                              const updated = [...newEvent.tickets];
+                              updated[idx].quantity = e.target.value;
+                              setNewEvent({ ...newEvent, tickets: updated });
+                            }}
+                            className="bg-slate-700 border border-white/10 rounded-lg px-3 py-2 text-white placeholder-slate-400 text-sm"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const updated = newEvent.tickets.filter((_, i) => i !== idx);
+                              setNewEvent({ ...newEvent, tickets: updated });
+                            }}
+                            className="bg-red-600/20 hover:bg-red-600/40 text-red-300 px-3 py-2 rounded-lg text-sm transition"
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  
                   <button
                     type="submit"
                     disabled={addingEvent}
@@ -355,6 +488,7 @@ const Admin = () => {
                         <th className="px-4 py-3 text-left font-semibold text-slate-300">Organizer</th>
                         <th className="px-4 py-3 text-left font-semibold text-slate-300">Date</th>
                         <th className="px-4 py-3 text-left font-semibold text-slate-300">Registrations</th>
+                        <th className="px-4 py-3 text-left font-semibold text-slate-300">Actions</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -367,6 +501,14 @@ const Admin = () => {
                             {new Date(event.EVENT_DATE).toLocaleDateString()}
                           </td>
                           <td className="px-4 py-3 text-indigo-400 font-semibold">{event.TOTAL_REGISTRATIONS || 0}</td>
+                          <td className="px-4 py-3">
+                            <button
+                              onClick={() => handleDeleteEvent(event.EVENT_ID)}
+                              className="px-3 py-1 bg-red-600/80 hover:bg-red-600 text-white rounded text-xs transition"
+                            >
+                              Delete
+                            </button>
+                          </td>
                         </tr>
                       ))}
                     </tbody>

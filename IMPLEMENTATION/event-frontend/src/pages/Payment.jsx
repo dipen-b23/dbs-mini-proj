@@ -145,7 +145,7 @@ const Payment = () => {
                 disabled={loading}
                 className="w-full py-3 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 disabled:from-slate-600 disabled:to-slate-600 text-white font-semibold rounded-xl shadow-lg shadow-indigo-500/30 transition-all duration-300 disabled:cursor-not-allowed"
               >
-                {loading ? 'Processing...' : `Pay $${data.amount}`}
+                {loading ? 'Processing...' : `Pay ₹${data.amount}`}
               </button>
             </form>
           </div>
